@@ -1,0 +1,61 @@
+{
+  "name": "@adminforth/chat-surface-adapter-telegram",
+  "version": "1.0.0",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "type": "module",
+  "homepage": "https://adminforth.dev/docs/tutorial/Adapters/chat-surface-adapter-telegram/",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/devforth/adminforth-chat-surface-adapter-telegram.git"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc"
+  },
+  "keywords": [
+    "adminforth",
+    "telegram",
+    "chat-surface",
+    "ai-agent"
+  ],
+  "author": "DevForth (https://devforth.io)",
+  "license": "MIT",
+  "description": "AdminForth Agent chat surface adapter for Telegram bots.",
+  "devDependencies": {
+    "semantic-release": "^24.2.1",
+    "semantic-release-slack-bot": "^4.0.2",
+    "typescript": "^5.9.3"
+  },
+  "peerDependencies": {
+    "@adminforth/agent": ">=1.0.2",
+    "adminforth": ">=2.54.0"
+  },
+  "release": {
+    "plugins": [
+      "@semantic-release/commit-analyzer",
+      "@semantic-release/release-notes-generator",
+      "@semantic-release/npm",
+      "@semantic-release/github",
+      [
+        "semantic-release-slack-bot",
+        {
+          "packageName": "@adminforth/chat-surface-adapter-telegram",
+          "notifyOnSuccess": true,
+          "notifyOnFail": true,
+          "slackIcon": ":package:",
+          "markdownReleaseNotes": true
+        }
+      ]
+    ],
+    "branches": [
+      "main",
+      {
+        "name": "next",
+        "prerelease": true
+      }
+    ]
+  }
+}

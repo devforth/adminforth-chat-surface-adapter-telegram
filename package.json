@@ -25,13 +25,13 @@
   "license": "MIT",
   "description": "AdminForth Agent chat surface adapter for Telegram bots.",
   "devDependencies": {
-    "semantic-release": "^24.2.1",
+    "semantic-release": "^24.2.9",
     "semantic-release-slack-bot": "^4.0.2",
     "typescript": "^5.9.3"
   },
   "peerDependencies": {
     "@adminforth/agent": ">=1.0.2",
-    "adminforth": ">=2.54.0"
+    "adminforth": ">=2.59.0"
   },
   "release": {
     "plugins": [

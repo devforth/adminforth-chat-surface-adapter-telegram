@@ -10,14 +10,6 @@ import {
 import { AdapterOptions } from "./types.js";
 import { randomInt } from "node:crypto";
 export type { AdapterOptions, TelegramStreamingMode } from "./types.js";
-export type {
-  ChatSurfaceAdapter,
-  ChatSurfaceCapabilities,
-  ChatSurfaceEvent,
-  ChatSurfaceEventSink,
-  ChatSurfaceIncomingMessage,
-  ChatSurfaceRequestContext,
-} from "adminforth";
 
 type TelegramUpdate = {
   message?: {

@@ -29,6 +29,9 @@
     "semantic-release-slack-bot": "^4.0.2",
     "typescript": "^5.9.3"
   },
+  "dependencies": {
+    "playwright": "^1.57.0"
+  },
   "peerDependencies": {
     "@adminforth/agent": ">=1.0.2",
     "adminforth": ">=2.59.0"

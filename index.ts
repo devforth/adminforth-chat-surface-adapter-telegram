@@ -8,8 +8,21 @@ import {
   type IAdminForth,
 } from "adminforth";
 import { AdapterOptions } from "./types.js";
+import { getFinalMessageStreamPreview, renderFinalMessageImages } from "./renderers.js";
 import { randomInt } from "node:crypto";
 export type { AdapterOptions, TelegramStreamingMode } from "./types.js";
+export {
+  getFinalMessageStreamPreview,
+  renderFinalMessageImages,
+  renderHtmlBlockToPng,
+  renderTablePng,
+  renderVegaLitePng,
+  type RenderedMessage,
+  type RenderedMessageImage,
+  type RenderTableColumn,
+  type RenderTablePngInput,
+  type VegaLiteSpec,
+} from "./renderers.js";
 
 type TelegramUpdate = {
   message?: {
@@ -165,16 +178,18 @@ export class TelegramChatSurfaceAdapter implements ChatSurfaceAdapter {
     };
 
     const flushDraft = async () => {
+      const draftPreviewText = getFinalMessageStreamPreview(text);
+
       if (
         closed ||
         done ||
         streamingMode !== "draft" ||
-        !text
+        !draftPreviewText
       ) {
         return;
       }
 
-      const draftText = truncateTelegramDraft(text);
+      const draftText = truncateTelegramDraft(draftPreviewText);
 
       if (draftText === lastDraftText) {
         return;
@@ -225,7 +240,7 @@ export class TelegramChatSurfaceAdapter implements ChatSurfaceAdapter {
           stopTyping();
           clearDraftTimer();
 
-          await this.sendMessage(
+          await this.sendFinalMessage(
             chatId,
             text || event.text,
           );
@@ -298,6 +313,34 @@ export class TelegramChatSurfaceAdapter implements ChatSurfaceAdapter {
       if (!response.ok) {
         throw new Error(`Telegram sendMessage failed: ${response.status} ${await response.text()}`);
       }
+    }
+  }
+
+  private async sendFinalMessage(chatId: string, text: string) {
+    const renderedMessage = await renderFinalMessageImages(text);
+
+    await this.sendMessage(chatId, renderedMessage.text);
+
+    for (const image of renderedMessage.images) {
+      await this.sendPhoto(chatId, image.buffer, image.filename);
+    }
+  }
+
+  private async sendPhoto(chatId: string, png: Buffer, filename: string) {
+    const photoBytes = new Uint8Array(png);
+    const formData = new FormData();
+    formData.append("chat_id", chatId);
+    formData.append("photo", new Blob([photoBytes], {
+      type: "image/png",
+    }), filename);
+
+    const response = await fetch(`${TELEGRAM_API_BASE_URL}/bot${this.options.botToken}/sendPhoto`, {
+      method: "POST",
+      body: formData,
+    });
+
+    if (!response.ok) {
+      throw new Error(`Telegram sendPhoto failed: ${response.status} ${await response.text()}`);
     }
   }
 

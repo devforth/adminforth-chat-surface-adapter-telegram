@@ -34,7 +34,7 @@
   },
   "peerDependencies": {
     "@adminforth/agent": ">=1.0.2",
-    "adminforth": ">=2.59.0"
+    "adminforth": ">=2.60.0"
   },
   "release": {
     "plugins": [

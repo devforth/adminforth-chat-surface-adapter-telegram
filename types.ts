@@ -7,6 +7,11 @@ export type AdapterOptions = {
   botToken: string;
 
   /**
+   * Telegram bot username used to build the AdminForth account-link URL.
+   */
+  botUsername?: string;
+
+  /**
    * Optional secret token configured in Telegram setWebhook.
    */
   webhookSecret?: string;
@@ -22,16 +27,4 @@ export type AdapterOptions = {
    * Default is 650ms.
    */
   draftUpdateIntervalMs?: number;
-
-  /**
-   * AdminForth admin user field that stores Telegram user id.
-   * Default is `telegramId`.
-   */
-  adminUserTelegramIdField?: string;
-
-  /**
-   * AdminForth admin users resource id.
-   * Default is `adminuser`.
-   */
-  adminUserResourceId?: string;
 };

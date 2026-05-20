@@ -1,11 +1,8 @@
 import {
-  AdminForthFilterOperators,
-  type AdminUser,
   type ChatSurfaceAdapter,
   type ChatSurfaceEventSink,
   type ChatSurfaceIncomingMessage,
   type ChatSurfaceRequestContext,
-  type IAdminForth,
 } from "adminforth";
 import { AdapterOptions } from "./types.js";
 import { getFinalMessageStreamPreview, renderFinalMessageImages } from "./renderers.js";
@@ -40,14 +37,20 @@ type TelegramUpdate = {
   };
 };
 
+type ChatSurfaceConnectAction = {
+  type: "url";
+  label: string;
+  url: string;
+};
+
 const TELEGRAM_API_BASE_URL = "https://api.telegram.org";
 const TELEGRAM_SECRET_HEADER = "x-telegram-bot-api-secret-token";
 const TELEGRAM_MESSAGE_MAX_LENGTH = 4096;
 const TELEGRAM_DRAFT_MAX_LENGTH = 4096;
 const DEFAULT_DRAFT_UPDATE_INTERVAL_MS = 650;
 const DEFAULT_TYPING_INTERVAL_MS = 4000;
-const DEFAULT_ADMIN_USER_RESOURCE_ID = "adminuser";
-const DEFAULT_ADMIN_USER_TELEGRAM_ID_FIELD = "telegramId";
+const TELEGRAM_START_COMMAND_PREFIX = "/start";
+const TELEGRAM_COMMAND_PARTS_RE = /\s+/;
 
 function createTelegramDraftId() {
   return randomInt(1, 2147483647);
@@ -90,10 +93,29 @@ function splitTelegramMessage(text: string) {
   return chunks;
 }
 
+function parseTelegramStartPayload(text: string) {
+  const [command, ...payloadParts] = text.trim().split(TELEGRAM_COMMAND_PARTS_RE);
+
+  if (command !== TELEGRAM_START_COMMAND_PREFIX && !command.startsWith(`${TELEGRAM_START_COMMAND_PREFIX}@`)) {
+    return null;
+  }
+
+  return payloadParts.join(" ") || null;
+}
+
 export class TelegramChatSurfaceAdapter implements ChatSurfaceAdapter {
   name = "telegram";
+  createConnectAction?: (input: { token: string }) => ChatSurfaceConnectAction;
 
-  constructor(private options: AdapterOptions) {}
+  constructor(private options: AdapterOptions) {
+    if (options.botUsername) {
+      this.createConnectAction = ({ token }) => ({
+        type: "url",
+        label: "Connect Telegram",
+        url: `https://t.me/${options.botUsername}?start=${encodeURIComponent(token)}`,
+      });
+    }
+  }
 
   validate() {
     if (!this.options.botToken) {
@@ -118,6 +140,8 @@ export class TelegramChatSurfaceAdapter implements ChatSurfaceAdapter {
       return null;
     }
 
+    const startPayload = parseTelegramStartPayload(text);
+
     return {
       surface: this.name,
       prompt: text,
@@ -125,6 +149,7 @@ export class TelegramChatSurfaceAdapter implements ChatSurfaceAdapter {
       externalUserId: String(userId),
       userTimeZone: "UTC",
       metadata: {
+        startPayload,
         telegramUpdate: update,
       },
     };
@@ -264,31 +289,6 @@ export class TelegramChatSurfaceAdapter implements ChatSurfaceAdapter {
         stopTyping();
         clearDraftTimer();
       },
-    };
-  }
-
-  async resolveAdminUser(input: {
-    adminforth: IAdminForth;
-    incoming: ChatSurfaceIncomingMessage;
-  }): Promise<AdminUser | null> {
-    const adminUserResourceId = this.options.adminUserResourceId ?? DEFAULT_ADMIN_USER_RESOURCE_ID;
-    const telegramIdField = this.options.adminUserTelegramIdField ?? DEFAULT_ADMIN_USER_TELEGRAM_ID_FIELD;
-    const adminUser = await input.adminforth.resource(adminUserResourceId).get([
-      {
-        field: telegramIdField,
-        operator: AdminForthFilterOperators.EQ,
-        value: input.incoming.externalUserId,
-      },
-    ]);
-
-    if (!adminUser) {
-      return null;
-    }
-
-    return {
-      pk: adminUser.id,
-      username: adminUser[input.adminforth.config.auth!.usernameField],
-      dbUser: adminUser,
     };
   }
 

@@ -33,7 +33,6 @@
     "playwright": "^1.57.0"
   },
   "peerDependencies": {
-    "@adminforth/agent": ">=1.0.2",
     "adminforth": ">=2.60.0"
   },
   "release": {

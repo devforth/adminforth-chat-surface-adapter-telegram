@@ -1,5 +1,6 @@
 import {
   type ChatSurfaceAdapter,
+  type ChatSurfaceEvent,
   type ChatSurfaceEventSink,
   type ChatSurfaceIncomingMessage,
   type ChatSurfaceRequestContext,
@@ -24,6 +25,16 @@ export {
 type TelegramUpdate = {
   message?: {
     text?: string;
+    caption?: string;
+    voice?: {
+      file_id?: string;
+      mime_type?: string;
+    };
+    audio?: {
+      file_id?: string;
+      file_name?: string;
+      mime_type?: string;
+    };
     chat?: {
       id?: number | string;
     };
@@ -37,11 +48,28 @@ type TelegramUpdate = {
   };
 };
 
+type TelegramGetFileResponse = {
+  ok: boolean;
+  result?: {
+    file_path?: string;
+  };
+  description?: string;
+};
+
 type ChatSurfaceConnectAction = {
   type: "url";
   label: string;
   url: string;
 };
+
+type TelegramChatSurfaceEvent =
+  | ChatSurfaceEvent
+  | {
+      type: "audio";
+      audio: Buffer;
+      filename: string;
+      mimeType: string;
+    };
 
 const TELEGRAM_API_BASE_URL = "https://api.telegram.org";
 const TELEGRAM_SECRET_HEADER = "x-telegram-bot-api-secret-token";
@@ -93,14 +121,16 @@ function splitTelegramMessage(text: string) {
   return chunks;
 }
 
-function parseTelegramStartPayload(text: string) {
+function parseTelegramStartCommand(text: string) {
   const [command, ...payloadParts] = text.trim().split(TELEGRAM_COMMAND_PARTS_RE);
+  const isStartCommand =
+    command === TELEGRAM_START_COMMAND_PREFIX ||
+    command.startsWith(`${TELEGRAM_START_COMMAND_PREFIX}@`);
 
-  if (command !== TELEGRAM_START_COMMAND_PREFIX && !command.startsWith(`${TELEGRAM_START_COMMAND_PREFIX}@`)) {
-    return null;
-  }
-
-  return payloadParts.join(" ") || null;
+  return {
+    isStartCommand,
+    payload: isStartCommand ? payloadParts.join(" ") || null : null,
+  };
 }
 
 export class TelegramChatSurfaceAdapter implements ChatSurfaceAdapter {
@@ -132,24 +162,59 @@ export class TelegramChatSurfaceAdapter implements ChatSurfaceAdapter {
     }
 
     const update = ctx.body as TelegramUpdate;
-    const text = update.message?.text;
-    const chatId = update.message?.chat?.id;
-    const userId = update.message?.from?.id;
+    const message = update.message;
+    const text = message?.text;
+    const chatId = message?.chat?.id;
+    const userId = message?.from?.id;
 
-    if (!text || chatId === undefined || userId === undefined) {
+    if (chatId === undefined || userId === undefined) {
       return null;
     }
 
-    const startPayload = parseTelegramStartPayload(text);
+    const startCommand = text
+      ? parseTelegramStartCommand(text)
+      : { isStartCommand: false, payload: null };
+
+    if (text) {
+      return {
+        surface: this.name,
+        prompt: text,
+        externalConversationId: String(chatId),
+        externalUserId: String(userId),
+        userTimeZone: "UTC",
+        metadata: {
+          isStartCommand: startCommand.isStartCommand,
+          startPayload: startCommand.payload,
+          telegramUpdate: update,
+        },
+      };
+    }
+
+    const voiceFileId = message?.voice?.file_id;
+    const audioFileId = message?.audio?.file_id;
+    const fileId = voiceFileId ?? audioFileId;
+
+    if (!fileId) {
+      return null;
+    }
+
+    const audio = await this.downloadTelegramFile({
+      fileId,
+      filename: message?.audio?.file_name ?? (voiceFileId ? "telegram-voice.ogg" : "telegram-audio"),
+      mimeType: message?.voice?.mime_type ?? message?.audio?.mime_type ?? "application/octet-stream",
+      abortSignal: ctx.abortSignal,
+    });
 
     return {
       surface: this.name,
-      prompt: text,
+      prompt: message?.caption ?? "",
+      audio,
       externalConversationId: String(chatId),
       externalUserId: String(userId),
       userTimeZone: "UTC",
       metadata: {
-        startPayload,
+        isStartCommand: startCommand.isStartCommand,
+        startPayload: startCommand.payload,
         telegramUpdate: update,
       },
     };
@@ -245,7 +310,7 @@ export class TelegramChatSurfaceAdapter implements ChatSurfaceAdapter {
     startTyping();
 
     return {
-      emit: async (event) => {
+      emit: async (event: TelegramChatSurfaceEvent) => {
         if (closed) {
           return;
         }
@@ -265,9 +330,16 @@ export class TelegramChatSurfaceAdapter implements ChatSurfaceAdapter {
           stopTyping();
           clearDraftTimer();
 
-          await this.sendFinalMessage(
+          await this.sendFinalMessage(chatId, text || event.text);
+          return;
+        }
+
+        if (event.type === "audio") {
+          await this.sendAudioFile(
             chatId,
-            text || event.text,
+            event.audio,
+            event.filename,
+            event.mimeType,
           );
           return;
         }
@@ -298,21 +370,11 @@ export class TelegramChatSurfaceAdapter implements ChatSurfaceAdapter {
     }
 
     for (const chunk of splitTelegramMessage(text)) {
-      const response = await fetch(`${TELEGRAM_API_BASE_URL}/bot${this.options.botToken}/sendMessage`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          chat_id: chatId,
-          text: chunk,
-          parse_mode: "Markdown",
-        }),
+      await this.telegramJson("sendMessage", {
+        chat_id: chatId,
+        text: chunk,
+        parse_mode: "Markdown",
       });
-
-      if (!response.ok) {
-        throw new Error(`Telegram sendMessage failed: ${response.status} ${await response.text()}`);
-      }
     }
   }
 
@@ -334,30 +396,95 @@ export class TelegramChatSurfaceAdapter implements ChatSurfaceAdapter {
       type: "image/png",
     }), filename);
 
-    const response = await fetch(`${TELEGRAM_API_BASE_URL}/bot${this.options.botToken}/sendPhoto`, {
+    await this.telegramMultipart("sendPhoto", formData);
+  }
+
+  private async sendChatAction(chatId: string, action: "typing" | "upload_voice" | "upload_audio") {
+    await this.telegramJson("sendChatAction", {
+      chat_id: chatId,
+      action,
+    });
+  }
+
+  private async downloadTelegramFile(input: {
+    fileId: string;
+    filename: string;
+    mimeType: string;
+    abortSignal: AbortSignal;
+  }) {
+    const fileResponse = await fetch(
+      `${TELEGRAM_API_BASE_URL}/bot${this.options.botToken}/getFile?file_id=${encodeURIComponent(input.fileId)}`,
+      { signal: input.abortSignal },
+    );
+
+    if (!fileResponse.ok) {
+      throw new Error(`Telegram getFile failed: ${fileResponse.status} ${await fileResponse.text()}`);
+    }
+
+    const fileData = await fileResponse.json() as TelegramGetFileResponse;
+    const filePath = fileData.result?.file_path;
+
+    if (!fileData.ok || !filePath) {
+      throw new Error(`Telegram getFile failed: ${fileData.description ?? "file_path is missing"}`);
+    }
+
+    const downloadResponse = await fetch(
+      `${TELEGRAM_API_BASE_URL}/file/bot${this.options.botToken}/${filePath}`,
+      { signal: input.abortSignal },
+    );
+
+    if (!downloadResponse.ok) {
+      throw new Error(`Telegram file download failed: ${downloadResponse.status} ${await downloadResponse.text()}`);
+    }
+
+    return {
+      buffer: Buffer.from(await downloadResponse.arrayBuffer()),
+      filename: input.filename,
+      mimeType: input.mimeType,
+    };
+  }
+
+  private async sendAudioFile(
+    chatId: string,
+    audio: Buffer,
+    filename: string,
+    mimeType: string,
+  ) {
+    const sendAsVoice = ["audio/ogg", "audio/opus"].includes(mimeType) || filename.endsWith(".ogg") || filename.endsWith(".opus");
+    const method = sendAsVoice ? "sendVoice" : "sendAudio";
+    const fieldName = sendAsVoice ? "voice" : "audio";
+    const audioBytes = new Uint8Array(audio);
+    const formData = new FormData();
+    formData.append("chat_id", chatId);
+    formData.append(fieldName, new Blob([audioBytes], {
+      type: mimeType,
+    }), filename);
+
+    await this.telegramMultipart(method, formData);
+  }
+
+  private async telegramMultipart(method: string, formData: FormData) {
+    const response = await fetch(`${TELEGRAM_API_BASE_URL}/bot${this.options.botToken}/${method}`, {
       method: "POST",
       body: formData,
     });
 
     if (!response.ok) {
-      throw new Error(`Telegram sendPhoto failed: ${response.status} ${await response.text()}`);
+      throw new Error(`Telegram ${method} failed: ${response.status} ${await response.text()}`);
     }
   }
 
-  private async sendChatAction(chatId: string, action: "typing") {
-    const response = await fetch(`${TELEGRAM_API_BASE_URL}/bot${this.options.botToken}/sendChatAction`, {
+  private async telegramJson(method: string, body: unknown) {
+    const response = await fetch(`${TELEGRAM_API_BASE_URL}/bot${this.options.botToken}/${method}`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        chat_id: chatId,
-        action,
-      }),
+      body: JSON.stringify(body),
     });
 
     if (!response.ok) {
-      throw new Error(`Telegram sendChatAction failed: ${response.status} ${await response.text()}`);
+      throw new Error(`Telegram ${method} failed: ${response.status} ${await response.text()}`);
     }
   }
 
@@ -367,22 +494,12 @@ export class TelegramChatSurfaceAdapter implements ChatSurfaceAdapter {
     text: string;
     parseMode?: "Markdown" | "MarkdownV2" | "HTML";
   }) {
-    const response = await fetch(`${TELEGRAM_API_BASE_URL}/bot${this.options.botToken}/sendMessageDraft`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        chat_id: Number(input.chatId),
-        draft_id: input.draftId,
-        text: input.text,
-        parse_mode: input.parseMode,
-      }),
+    await this.telegramJson("sendMessageDraft", {
+      chat_id: Number(input.chatId),
+      draft_id: input.draftId,
+      text: input.text,
+      parse_mode: input.parseMode,
     });
-
-    if (!response.ok) {
-      throw new Error(`Telegram sendMessageDraft failed: ${response.status} ${await response.text()}`);
-    }
   }
 }
 

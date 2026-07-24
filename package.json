@@ -8,6 +8,7 @@
     "type": "git",
     "url": "https://github.com/devforth/adminforth-chat-surface-adapter-telegram.git"
   },
+  "homepage": "https://adminforth.dev/docs/tutorial/Adapters/chat-surface-adapter-telegram/",
   "publishConfig": {
     "access": "public"
   },

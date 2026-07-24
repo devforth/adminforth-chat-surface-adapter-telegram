@@ -4,7 +4,6 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "type": "module",
-  "homepage": "https://adminforth.dev/docs/tutorial/Adapters/chat-surface-adapter-telegram/",
   "repository": {
     "type": "git",
     "url": "https://github.com/devforth/adminforth-chat-surface-adapter-telegram.git"

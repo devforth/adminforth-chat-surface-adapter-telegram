@@ -151,12 +151,15 @@ export class TelegramChatSurfaceAdapter implements ChatSurfaceAdapter {
     if (!this.options.botToken) {
       throw new Error("Telegram botToken is required");
     }
+
+    if (!this.options.webhookSecret) {
+      throw new Error("Telegram webhookSecret is required");
+    }
   }
 
   async parseIncomingMessage(ctx: ChatSurfaceRequestContext) {
     if (
-      this.options.webhookSecret
-      && getHeaderValue(ctx.headers, TELEGRAM_SECRET_HEADER) !== this.options.webhookSecret
+      getHeaderValue(ctx.headers, TELEGRAM_SECRET_HEADER) !== this.options.webhookSecret
     ) {
       return null;
     }

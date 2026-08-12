@@ -12,9 +12,9 @@ export type AdapterOptions = {
   botUsername?: string;
 
   /**
-   * Optional secret token configured in Telegram setWebhook.
+   * Secret token configured in Telegram setWebhook.
    */
-  webhookSecret?: string;
+  webhookSecret: string;
 
   /**
    * Streaming behavior for Telegram responses.

@@ -1,4 +1,9 @@
+import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
+
 type PlaywrightChromium = typeof import("playwright").chromium;
+
+type PageScript = { path: string } | { content: string };
 
 export type RenderTableColumn =
   | string
@@ -48,6 +53,13 @@ const VEGA_LITE_BLOCK_RE = /```vega-lite\s*([\s\S]*?)```/g;
 const MARKDOWN_TABLE_SEPARATOR_RE = /^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$/;
 const MARKDOWN_TABLE_ROW_RE = /^\s*\|.*\|\s*$/;
 const VEGA_LITE_FENCE_START = "```vega-lite";
+const require = createRequire(import.meta.url);
+// the packages export only their ESM entries, the browser builds which set window.vega, vegaLite and vegaEmbed lie next to them
+const VEGA_BROWSER_SCRIPT_PATHS = [
+  ["vega", "vega.min.js"],
+  ["vega-lite", "vega-lite.min.js"],
+  ["vega-embed", "vega-embed.min.js"],
+].map(([packageName, fileName]) => join(dirname(require.resolve(packageName)), fileName));
 const HTML_ESCAPE_MAP: Record<string, string> = {
   "&": "&amp;",
   "<": "&lt;",
@@ -227,7 +239,7 @@ async function getChromium(): Promise<PlaywrightChromium> {
   return chromium;
 }
 
-export async function renderHtmlBlockToPng(html: string, selector: string): Promise<Buffer> {
+export async function renderHtmlBlockToPng(html: string, selector: string, scripts: PageScript[] = []): Promise<Buffer> {
   const chromium = await getChromium();
   const browser = await chromium.launch({
     headless: true,
@@ -244,6 +256,10 @@ export async function renderHtmlBlockToPng(html: string, selector: string): Prom
     await page.setContent(html, {
       waitUntil: "networkidle",
     });
+    // in order, after the markup: a script uses the globals of the ones before it
+    for (const script of scripts) {
+      await page.addScriptTag(script);
+    }
     await page.evaluate(() => document.fonts.ready);
     const hasRenderReady = await page.evaluate(() => (
       Boolean((window as typeof window & {
@@ -378,9 +394,6 @@ export async function renderVegaLitePng(spec: VegaLiteSpec): Promise<Buffer> {
     <html>
       <head>
         <meta charset="utf-8" />
-        <script src="https://cdn.jsdelivr.net/npm/vega@5"></script>
-        <script src="https://cdn.jsdelivr.net/npm/vega-lite@5"></script>
-        <script src="https://cdn.jsdelivr.net/npm/vega-embed@6"></script>
         <style>
           body {
             margin: 0;
@@ -402,22 +415,26 @@ export async function renderVegaLitePng(spec: VegaLiteSpec): Promise<Buffer> {
       </head>
       <body>
         <section id="adminforth-vega-lite-render"></section>
-        <script>
-          window.__adminforthRenderReady = vegaEmbed(
-            "#adminforth-vega-lite-render",
-            ${JSON.stringify(spec)},
-            { actions: false, renderer: "svg" }
-          )
-            .then(function () {
-              window.__adminforthRenderDone = true;
-            })
-            .catch(function (error) {
-              window.__adminforthRenderError = String(error && error.message ? error.message : error);
-            });
-        </script>
       </body>
     </html>
-  `, "#adminforth-vega-lite-render");
+  `, "#adminforth-vega-lite-render", [
+    ...VEGA_BROWSER_SCRIPT_PATHS.map((path) => ({ path })),
+    {
+      content: `
+        window.__adminforthRenderReady = vegaEmbed(
+          "#adminforth-vega-lite-render",
+          ${JSON.stringify(spec)},
+          { actions: false, renderer: "svg" }
+        )
+          .then(function () {
+            window.__adminforthRenderDone = true;
+          })
+          .catch(function (error) {
+            window.__adminforthRenderError = String(error && error.message ? error.message : error);
+          });
+      `,
+    },
+  ]);
 }
 
 export async function renderFinalMessageImages(text: string): Promise<RenderedMessage> {

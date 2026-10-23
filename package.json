@@ -31,7 +31,10 @@
     "typescript": "^5.9.3"
   },
   "dependencies": {
-    "playwright": "^1.57.0"
+    "playwright": "^1.57.0",
+    "vega": "^6.4.0",
+    "vega-embed": "^7.3.0",
+    "vega-lite": "^6.5.0"
   },
   "peerDependencies": {
     "adminforth": "^4.7.3"
